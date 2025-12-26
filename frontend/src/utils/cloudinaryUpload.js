@@ -3,45 +3,38 @@ import axios from "axios";
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:5001/api";
 
-/**
- * Upload file to Cloudinary via backend
- */
+/* =========================================================
+   UPLOAD FILE (via backend → Cloudinary)
+   ========================================================= */
 export const uploadToCloudinary = async (file) => {
+  if (!file) throw new Error("No file provided");
+
+  const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+  if (file.size > MAX_FILE_SIZE) {
+    throw new Error("File size exceeds 100MB limit");
+  }
+
+const formData = new FormData();  formData.append("file", file);
+
   try {
-    if (!file) throw new Error("No file provided");
-
-    const MAX_FILE_SIZE = 100 * 1024 * 1024;
-    if (file.size > MAX_FILE_SIZE) {
-      throw new Error("File size exceeds 100MB limit");
-    }
-
-    console.log("📤 Uploading to Cloudinary...");
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const response = await axios.post(`${API_BASE_URL}/upload`, formData, {
+    const res = await axios.post(`${API_BASE_URL}/upload`, formData, {
       headers: { "Content-Type": "multipart/form-data" },
     });
 
-    if (response.data.success) {
-      // support both `url` and `fileUrl` in case backend returns either
-      const url =
-        response.data.url || response.data.fileUrl || response.data.secure_url;
-      console.log("✅ File uploaded:", url);
-      return url;
+    if (!res.data?.success) {
+      throw new Error("Cloudinary upload failed");
     }
 
-    throw new Error("Upload failed");
-  } catch (error) {
-    console.error("❌ Cloudinary upload error:", error);
-    throw error;
+    return res.data.url;
+  } catch (err) {
+    console.error("❌ Upload error:", err);
+    throw err;
   }
 };
 
-/**
- * Save Cloudinary URL to database
- */
+/* =========================================================
+   SAVE FILE METADATA TO DATABASE
+   ========================================================= */
 export const saveFileUrlToDatabase = async (
   userId,
   filename,
@@ -49,12 +42,12 @@ export const saveFileUrlToDatabase = async (
   fileType,
   fileSize
 ) => {
-  try {
-    if (!userId || !fileUrl || !filename) {
-      throw new Error("userId, fileUrl, and filename are required");
-    }
+  if (!userId || !filename || !fileUrl) {
+    throw new Error("Missing required file data");
+  }
 
-    const response = await axios.post(`${API_BASE_URL}/files/upload-url`, {
+  try {
+    const res = await axios.post(`${API_BASE_URL}/files/upload-url`, {
       userId,
       filename,
       fileUrl,
@@ -62,57 +55,38 @@ export const saveFileUrlToDatabase = async (
       fileSize,
     });
 
-    if (response.data.success) {
-      console.log("✅ File URL saved to database");
-      return response.data.data;
-    } else {
-      throw new Error("Failed to save file URL");
+    if (!res.data?.success) {
+      throw new Error("Failed to save file metadata");
     }
-  } catch (error) {
-    console.error("❌ Error saving file URL:", error);
-    throw error;
+
+    return res.data.data;
+  } catch (err) {
+    console.error("❌ Save file error:", err);
+    throw err;
   }
 };
 
-/**
- * Get all files for a user
- */
+/* =========================================================
+   GET ALL FILES FOR USER
+   (⚠️ FIXED ROUTE)
+   ========================================================= */
 export const getUserFiles = async (userId) => {
   const response = await axios.get(
-    `${API_BASE_URL}/files/user/${userId}/files`
+    `${API_BASE_URL}/files/user/${userId}`
   );
   return response.data;
 };
 
-/**
- * Delete a file
- */
+/* =========================================================
+   DELETE FILE
+   ========================================================= */
 export const deleteUserFile = async (userId, fileId) => {
-  const response = await axios.delete(
-    `${API_BASE_URL}/files/user/${userId}/files/${fileId}`
-  );
-  return response.data;
-};
+  if (!userId || !fileId) throw new Error("Missing userId or fileId");
 
-/**
- * Get stats
- */
-export const getFileStats = async (userId) => {
-  const response = await axios.get(
-    `${API_BASE_URL}/files/user/${userId}/stats`
+  const res = await axios.delete(
+    `${API_BASE_URL}/files/${fileId}`,
+    { data: { userId } }
   );
-  return response.data;
-};
 
-/**
- * Search files
- */
-export const searchUserFiles = async (userId, query) => {
-  const response = await axios.get(
-    `${API_BASE_URL}/files/user/${userId}/search`,
-    {
-      params: { query },
-    }
-  );
-  return response.data;
+  return res.data;
 };

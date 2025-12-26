@@ -1,306 +1,272 @@
-import { useState, useEffect } from "react";
-import api from "../../utils/api";
+import { useEffect, useState } from "react";
+import toast from "react-hot-toast";
+import { FiUpload, FiFolder } from "react-icons/fi";
+
+import SmartPDFViewer from "../../components/SmartPDFViewer";
+import FilesModal from "./FilesModal";
+import Window from "../../components/DraggableComponents/Window";
+import Loading from "../../components/Loading/Loading";
+
+import { generateSummary } from "../../utils/summaryApi";
 import {
   uploadToCloudinary,
   saveFileUrlToDatabase,
   getUserFiles,
 } from "../../utils/cloudinaryUpload";
-import toast from "react-hot-toast";
-import Loading from "../../components/Loading/Loading";
-import {
-  FiUpload,
-  FiCopy,
-  FiTrash2,
-  FiFileText,
-  FiExternalLink,
-} from "react-icons/fi";
-import PDFViewer from "../../components/PDFViewer.jsx";
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:5001/api";
 
 export default function Summarizer() {
+  const userId = JSON.parse(localStorage.getItem("user"))?._id;
+
   const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [windows, setWindows] = useState([]);
+  const [showFilesModal, setShowFilesModal] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [userFiles, setUserFiles] = useState([]);
-  const [selectedFile, setSelectedFile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [userId, setUserId] = useState(null);
 
-  // Load user ID
+  const [summaryData, setSummaryData] = useState({});
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  /* ================== FETCH FILES ================== */
   useEffect(() => {
-    const storedUserId =
-      localStorage.getItem("userId") ||
-      JSON.parse(localStorage.getItem("user") || "{}")?.id ||
-      "demo-user";
+    if (!userId) return;
 
-    setUserId(storedUserId);
-  }, []);
-
-  // Fetch user files
-  useEffect(() => {
-    if (userId) fetchUserFiles();
+    getUserFiles(userId)
+      .then((res) => setFiles(res.data || []))
+      .finally(() => setLoading(false));
   }, [userId]);
 
-  const fetchUserFiles = async () => {
-    try {
-      const response = await getUserFiles(userId);
-
-      if (response.success && Array.isArray(response.data)) {
-        setUserFiles(response.data);
-      } else {
-        setUserFiles([]);
+  /* ================== KEYBOARD SHORTCUT ================== */
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "d") {
+        e.preventDefault();
+        setShowFilesModal(true);
       }
-    } catch (e) {
-      console.error("❌ File fetch error", e);
-      setUserFiles([]);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  /* ================== WINDOW MANAGEMENT ================== */
+
+  const openFileWindow = (file) => {
+    if (windows.some((w) => w.id === file._id)) return;
+
+    setWindows((prev) => [
+      ...prev,
+      {
+        id: file._id,
+        title: file.filename,
+        file,
+        layout: "normal",
+        position: { x: 100 + prev.length * 40, y: 80 },
+        size: { width: 600, height: 500 },
+      },
+    ]);
+  };
+
+  const closeWindow = (id) => {
+    setWindows((prev) => prev.filter((w) => w.id !== id));
+  };
+
+  const updateWindow = (id, updates) => {
+    if (id === "SPLIT_HORIZONTAL") return applySplit();
+    if (id === "GRID_ALL") return applyGrid();
+
+    setWindows((prev) =>
+      prev.map((w) => (w.id === id ? { ...w, ...updates } : w))
+    );
+  };
+
+  const applySplit = () => {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    setWindows((prev) =>
+      prev.map((win, i) => ({
+        ...win,
+        layout: "split",
+        position: { x: i % 2 === 0 ? 0 : w / 2, y: 0 },
+        size: { width: w / 2, height: h },
+      }))
+    );
+  };
+
+  const applyGrid = () => {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    setWindows((prev) =>
+      prev.map((win, i) => ({
+        ...win,
+        layout: "grid",
+        position: {
+          x: (i % 2) * (w / 2),
+          y: Math.floor(i / 2) * (h / 2),
+        },
+        size: { width: w / 2, height: h / 2 },
+      }))
+    );
+  };
+const handleAction = async (type, file) => {
+  const id = `${type}-${file._id}`;
+
+  if (windows.some(w => w.id === id)) return;
+
+  // 👉 QUIZ OPENS IN NEW TAB
+  if (type === "quiz") {
+    window.open(`/quiz?fileId=${file._id}`, "_blank");
+    return;
+  }
+
+  // 👉 SUMMARY / NOTES
+  setWindows(prev => [
+    ...prev,
+    {
+      id,
+      title: `${type.toUpperCase()} - ${file.filename}`,
+      file,
+      type,
+      position: { x: 120, y: 120 },
+      size: { width: 520, height: 420 },
+      layout: "normal",
+    },
+  ]);
+
+  if (type === "summary") {
+    setSummaryLoading(true);
+    try {
+      const res = await generateSummary(file._id);
+      setSummaryData(prev => ({
+        ...prev,
+        [file._id]: res.summary,
+      }));
+    } catch (err) {
+      toast.error("Failed to generate summary");
     } finally {
-      setLoading(false);
+      setSummaryLoading(false);
     }
-  };
+  }
+};
+  /* ================== UPLOAD ================== */
 
-  const handleFileChange = (e) => {
-    const selected = e.target.files[0];
-    if (selected) setFile(selected);
-  };
-
-  const handleFileUpload = async () => {
-    if (!file) return toast.error("Please select a file");
+  const handleUpload = async () => {
+    if (!file) return toast.error("Select a file");
 
     setUploading(true);
     try {
-      const cloudUrl = await uploadToCloudinary(file);
-
+      const url = await uploadToCloudinary(file);
       await saveFileUrlToDatabase(
         userId,
         file.name,
-        cloudUrl,
+        url,
         file.type,
         file.size
       );
 
-      toast.success("File uploaded!");
-
+      toast.success("Uploaded");
       setFile(null);
-      const input = document.querySelector('input[type="file"]');
-      if (input) input.value = "";
 
-      await fetchUserFiles();
-    } catch (err) {
-      toast.error(err.message);
+      const res = await getUserFiles(userId);
+      setFiles(res.data || []);
+    } catch {
+      toast.error("Upload failed");
     } finally {
       setUploading(false);
     }
   };
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(selectedFile.fileUrl);
-    toast.success("Copied!");
-  };
-
-  const handleDelete = async (fileId) => {
-    if (!confirm("Delete this file?")) return;
-
-    try {
-      const res = await api.delete(`/files/user/${userId}/files/${fileId}`);
-
-      if (res.data.success) {
-        toast.success("Deleted");
-        await fetchUserFiles();
-        if (selectedFile?.id === fileId) setSelectedFile(null);
-      }
-    } catch {
-      toast.error("Error deleting file");
-    }
-  };
-
-  const formatFileSize = (bytes) => {
-    if (!bytes) return "0 Bytes";
-    const k = 1024;
-    const sizes = ["Bytes", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${Math.round((bytes / Math.pow(k, i)) * 100) / 100} ${sizes[i]}`;
-  };
-
-  const formatDate = (date) =>
-    new Date(date).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-
   if (loading) return <Loading />;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4 sm:p-6">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold mb-8 text-gray-900 dark:text-white">
-          Smart Summarizer
-        </h1>
+    <div className="h-[calc(100vh-64px)] overflow-hidden bg-gray-100 p-6">
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* HEADER */}
+      <div className="flex gap-4 mb-4 ml-10">
+        <h1 className="text-3xl font-bold">Smart Summarizer</h1>
 
-          {/* ================= LEFT PANEL ================= */}
-          <div className="lg:col-span-1 space-y-6">
+        <label className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded cursor-pointer">
+          <FiUpload />
+          Upload
+          <input type="file" hidden onChange={(e) => setFile(e.target.files[0])} />
+        </label>
 
-            {/* Upload Box */}
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-              <h2 className="text-xl font-bold mb-4">Upload File</h2>
-
-              <div className="border-2 border-dashed p-6 rounded-lg text-center">
-                <FiUpload className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-
-                <label className="cursor-pointer">
-                  <span className="font-semibold">Click to upload</span>
-                  <p className="text-xs text-gray-500">or drag & drop</p>
-                  <input
-                    type="file"
-                    className="hidden"
-                    onChange={handleFileChange}
-                    accept=".pdf,.jpg,.jpeg,.png,.txt,.doc,.docx"
-                  />
-                </label>
-              </div>
-
-              {file && (
-                <div className="mt-4 bg-blue-50 p-3 rounded">
-                  <p className="font-medium truncate">{file.name}</p>
-                  <p className="text-xs">{formatFileSize(file.size)}</p>
-                </div>
-              )}
-
-              <button
-                onClick={handleFileUpload}
-                disabled={!file || uploading}
-                className="w-full mt-4 bg-blue-600 text-white py-2 rounded"
-              >
-                {uploading ? "Uploading..." : "Upload File"}
-              </button>
-            </div>
-
-            {/* ================= Upload History ================= */}
-            <div className="bg-white dark:bg-gray-800 p-6 rounded shadow">
-              <h3 className="text-xl font-bold mb-4">Upload History</h3>
-
-              {userFiles.length > 0 ? (
-                <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {userFiles.map((file) => (
-                    <div
-                      key={file.id}
-                      onClick={() => setSelectedFile(file)}
-                      className={`p-4 rounded border cursor-pointer ${
-                        selectedFile?.id === file.id
-                          ? "bg-blue-50 border-blue-500"
-                          : "bg-gray-50 hover:border-blue-500"
-                      }`}
-                    >
-                      <h4 className="font-semibold truncate">{file.filename}</h4>
-                      <p className="text-xs">
-                        {formatDate(file.uploadedAt)} •{" "}
-                        {formatFileSize(file.fileSize)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-center py-8">No files yet.</p>
-              )}
-            </div>
-
-          </div>
-
-          {/* ================= RIGHT PANEL ================= */}
-          <div className="lg:col-span-2 space-y-6">
-
-            {/* File Details / Preview */}
-            {selectedFile ? (
-              <div className="bg-white dark:bg-gray-800 p-6 rounded shadow-md">
-
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h2 className="text-2xl font-bold">
-                      {selectedFile.filename}
-                    </h2>
-                    {/* <p className="text-sm mt-2">
-                      {formatDate(selectedFile.uploadedAt)}
-                    </p>
-                    <p className="text-sm">
-                      {formatFileSize(selectedFile.fileSize)}
-                    </p> */}
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button onClick={handleCopy} className="p-2 bg-gray-200 rounded">
-                      <FiCopy />
-                    </button>
-
-                    <a
-                      href={selectedFile.fileUrl}
-                      target="_blank"
-                      className="p-2 bg-gray-200 rounded"
-                    >
-                      <FiExternalLink />
-                    </a>
-
-                    <button
-                      onClick={() => handleDelete(selectedFile.id)}
-                      className="p-2 bg-red-200 text-red-600 rounded"
-                    >
-                      <FiTrash2 />
-                    </button>
-                  </div>
-                </div>
-
-                {/* <div className="bg-gray-50 p-4 rounded mt-4">
-                  <p className="text-sm font-semibold">File URL:</p>
-                  <p className="text-xs break-all text-blue-600 mt-1">
-                    {selectedFile.fileUrl}
-                  </p>
-                </div> */}
-
-                <div className="mt-6">
-                  {selectedFile.fileType?.startsWith("image/") && (
-                    <img
-                      src={selectedFile.fileUrl}
-                      className="w-full max-h-[600px] rounded shadow object-contain"
-                    />
-                  )}
-
-                  {selectedFile.fileType === "application/pdf" && (
-                    <PDFViewer
-                      url={`${API_BASE_URL}/files/proxy-pdf?url=${encodeURIComponent(
-                        selectedFile.fileUrl
-                      )}`}
-                    />
-                  )}
-
-                  {!selectedFile.fileType?.startsWith("image/") &&
-                    selectedFile.fileType !== "application/pdf" && (
-                      <div className="p-4 mt-4 bg-gray-100 rounded-lg text-center">
-                        <p>No preview available</p>
-                        <a
-                          href={selectedFile.fileUrl}
-                          target="_blank"
-                          className="text-blue-600 underline mt-2 inline-block"
-                        >
-                          Open File
-                        </a>
-                      </div>
-                    )}
-                </div>
-              </div>
-            ) : (
-              <div className="bg-white dark:bg-gray-800 p-12 rounded shadow text-center">
-                <FiFileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                <p>Select a file to view details</p>
-              </div>
-            )}
-          </div>
-
-        </div>
+        <button
+          onClick={() => setShowFilesModal(true)}
+          className="flex items-center gap-2 bg-gray-700 text-white px-4 py-2 rounded"
+        >
+          <FiFolder /> All Files
+        </button>
       </div>
+
+      {file && (
+        <div className="bg-white p-3 mb-3 flex justify-between rounded">
+          <span>{file.name}</span>
+          <button
+            onClick={handleUpload}
+            className="bg-blue-600 text-white px-4 py-1 rounded"
+          >
+            {uploading ? "Uploading..." : "Confirm"}
+          </button>
+        </div>
+      )}
+
+      {/* WINDOWS */}
+      {windows.map((win) => (
+        <Window
+  key={win.id}
+  data={win}
+  onClose={closeWindow}
+  onUpdate={updateWindow}
+  onAction={handleAction}
+>
+          {win.type === "summary" && (
+  <div className="p-4 text-gray-800 dark:text-white h-full overflow-auto">
+    <h2 className="text-lg font-bold mb-3">📄 Summary</h2>
+
+    {summaryLoading ? (
+      <p className="animate-pulse text-gray-500">Generating summary...</p>
+    ) : (
+      <p className="whitespace-pre-wrap leading-relaxed">
+        {summaryData[win.file._id] || "No summary generated yet."}
+      </p>
+    )}
+  </div>
+)}
+
+{win.type === "notes" && (
+  <div className="p-4 text-gray-800 dark:text-white">
+    <h2 className="text-lg font-bold mb-2">Notes</h2>
+    <textarea
+      className="w-full h-[250px] p-2 border rounded"
+      placeholder="Write your notes here..."
+    />
+  </div>
+)}
+
+{!win.type && (
+  win.file.fileType.startsWith("image/") ? (
+    <img
+      src={win.file.fileUrl}
+      className="w-full h-full object-contain"
+    />
+  ) : (
+    <SmartPDFViewer
+      fileUrl={win.file.fileUrl}
+      fileId={win.file._id}
+    />
+  )
+)}
+        </Window>
+      ))}
+
+      {showFilesModal && (
+        <FilesModal
+          files={files}
+          onClose={() => setShowFilesModal(false)}
+          onSelect={openFileWindow}
+        />
+      )}
     </div>
   );
 }

@@ -53,3 +53,14 @@ body::before {
   background: #fef3c7;
   color: #1e40af;
 }
+/* Fix PDF overflow */
+.pdf-container {
+  width: 100% !important;
+  height: 100% !important;
+  overflow-x: hidden !important;
+}
+
+.pdf-container canvas {
+  max-width: 100% !important;
+  height: auto !important;
+}

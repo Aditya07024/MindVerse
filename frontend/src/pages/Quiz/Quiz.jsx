@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
-import api from '../../utils/api';
-import toast from 'react-hot-toast';
-import Loading from '../../components/Loading/Loading';
-import { FiPlay, FiClock, FiAward, FiCheckCircle, FiXCircle } from 'react-icons/fi';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from "react";
+import toast from "react-hot-toast";
+import { FiPlay, FiClock, FiAward } from "react-icons/fi";
+import { Link, useParams } from "react-router-dom";
+import api from "../../utils/api";
+import Loading from "../../components/Loading/Loading";
 
 export default function Quiz() {
+  const { fileId } = useParams(); // 👈 from route
   const [quizzes, setQuizzes] = useState([]);
   const [currentQuiz, setCurrentQuiz] = useState(null);
   const [currentQuestion, setCurrentQuestion] = useState(0);
@@ -16,230 +17,202 @@ export default function Quiz() {
   const [loading, setLoading] = useState(true);
   const [quizLoading, setQuizLoading] = useState(false);
 
+  /* ================= FETCH QUIZZES ================= */
   useEffect(() => {
-    fetchQuizzes();
+    const fetch = async () => {
+      try {
+        const res = await api.get("/quiz");
+        setQuizzes(res.data || []);
+      } catch {
+        toast.error("Failed to load quizzes");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetch();
   }, []);
 
+  /* ================= TIMER ================= */
   useEffect(() => {
-    if (timeLeft > 0 && currentQuiz) {
-      const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
-      return () => clearTimeout(timer);
-    } else if (timeLeft === 0 && currentQuiz && !score) {
-      handleSubmitQuiz();
-    }
+    if (!currentQuiz || timeLeft <= 0) return;
+
+    const timer = setInterval(() => {
+      setTimeLeft((t) => t - 1);
+    }, 1000);
+
+    return () => clearInterval(timer);
   }, [timeLeft, currentQuiz]);
 
-  const fetchQuizzes = async () => {
-    try {
-      const res = await api.get('/quiz');
-      setQuizzes(res.data);
-    } catch (error) {
-      toast.error('Failed to fetch quizzes');
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  /* ================= START QUIZ ================= */
   const startQuiz = async (quizId) => {
-    setQuizLoading(true);
     try {
+      setQuizLoading(true);
       const res = await api.post(`/quiz/${quizId}/start`);
       setCurrentQuiz(res.data);
       setCurrentQuestion(0);
       setSelectedAnswer(null);
       setAnswers([]);
-      setTimeLeft(res.data.duration * 60);
       setScore(null);
-    } catch (error) {
-      toast.error('Failed to start quiz');
+      setTimeLeft(res.data.duration * 60);
+    } catch {
+      toast.error("Failed to start quiz");
     } finally {
       setQuizLoading(false);
     }
   };
 
-  const handleAnswerSelect = (answer) => {
-    setSelectedAnswer(answer);
-  };
-
+  /* ================= ANSWERS ================= */
   const handleNext = () => {
     if (selectedAnswer === null) {
-      toast.error('Please select an answer');
+      toast.error("Select an answer");
       return;
     }
-    const newAnswers = [...answers, selectedAnswer];
-    setAnswers(newAnswers);
+
+    const updated = [...answers, selectedAnswer];
+    setAnswers(updated);
+    setSelectedAnswer(null);
+
     if (currentQuestion < currentQuiz.questions.length - 1) {
-      setCurrentQuestion(currentQuestion + 1);
-      setSelectedAnswer(null);
+      setCurrentQuestion((p) => p + 1);
     } else {
-      handleSubmitQuiz(newAnswers);
+      submitQuiz(updated);
     }
   };
 
-  const handleSubmitQuiz = async (finalAnswers = null) => {
-    const answersToSubmit = finalAnswers || answers;
+  const submitQuiz = async (finalAnswers) => {
     try {
       const res = await api.post(`/quiz/${currentQuiz._id}/submit`, {
-        answers: answersToSubmit,
+        answers: finalAnswers,
       });
       setScore(res.data);
       setCurrentQuiz(null);
-      fetchQuizzes();
-    } catch (error) {
-      toast.error('Failed to submit quiz');
+    } catch {
+      toast.error("Failed to submit quiz");
     }
   };
 
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  /* ================= UI STATES ================= */
 
   if (loading) return <Loading />;
 
+  /* ===== SCORE PAGE ===== */
   if (score) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8 px-4">
-        <div className="max-w-2xl mx-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8 text-center">
-            <FiAward className="w-16 h-16 text-yellow-500 mx-auto mb-4" />
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Quiz Complete!</h2>
-            <div className="space-y-4 mb-6">
-              <div>
-                <p className="text-gray-600 dark:text-gray-400">Your Score</p>
-                <p className="text-4xl font-bold text-blue-600 dark:text-blue-400">
-                  {score.score}/{score.total}
-                </p>
-              </div>
-              <div>
-                <p className="text-gray-600 dark:text-gray-400">Accuracy</p>
-                <p className="text-2xl font-semibold text-green-600 dark:text-green-400">
-                  {score.accuracy}%
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-4 justify-center">
-              <button
-                onClick={() => {
-                  setScore(null);
-                  setCurrentQuiz(null);
-                }}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-              >
-                Take Another Quiz
-              </button>
-              <Link
-                to="/leaderboard"
-                className="px-6 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition"
-              >
-                View Leaderboard
-              </Link>
-            </div>
+      <div className="min-h-screen bg-gray-50 p-6 flex justify-center items-center">
+        <div className="bg-white rounded-xl shadow p-8 w-full max-w-lg text-center">
+          <FiAward className="text-yellow-500 w-14 h-14 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold mb-2">Quiz Completed</h2>
+
+          <p className="text-lg mb-2">
+            Score: <b>{score.score}/{score.total}</b>
+          </p>
+
+          <p className="text-green-600 font-semibold">
+            Accuracy: {score.accuracy}%
+          </p>
+
+          <div className="mt-6 flex gap-3 justify-center">
+            <button
+              onClick={() => setScore(null)}
+              className="px-4 py-2 bg-blue-600 text-white rounded"
+            >
+              Try Again
+            </button>
+
+            <Link
+              to="/leaderboard"
+              className="px-4 py-2 bg-gray-700 text-white rounded"
+            >
+              Leaderboard
+            </Link>
           </div>
         </div>
       </div>
     );
   }
 
+  /* ===== QUIZ ACTIVE ===== */
   if (currentQuiz) {
     const question = currentQuiz.questions[currentQuestion];
-    const progress = ((currentQuestion + 1) / currentQuiz.questions.length) * 100;
 
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8 px-4">
-        <div className="max-w-3xl mx-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white">{currentQuiz.title}</h2>
-              <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
-                <FiClock />
-                {formatTime(timeLeft)}
-              </div>
-            </div>
-            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-              <div
-                className="bg-blue-600 h-2 rounded-full transition-all"
-                style={{ width: `${progress}%` }}
-              ></div>
-            </div>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-              Question {currentQuestion + 1} of {currentQuiz.questions.length}
-            </p>
+      <div className="min-h-screen bg-gray-100 p-6 flex justify-center">
+        <div className="max-w-3xl w-full bg-white rounded-lg shadow p-6">
+          <div className="flex justify-between mb-4">
+            <h2 className="font-bold text-lg">{currentQuiz.title}</h2>
+            <span className="text-red-500 flex items-center gap-1">
+              <FiClock /> {Math.max(timeLeft, 0)}s
+            </span>
           </div>
 
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">
-              {question.question}
-            </h3>
-            <div className="space-y-3">
-              {question.options.map((option, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => handleAnswerSelect(idx)}
-                  className={`w-full text-left p-4 rounded-lg border-2 transition ${
-                    selectedAnswer === idx
-                      ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
-                  }`}
-                >
-                  <span className="font-semibold text-gray-900 dark:text-white">{option}</span>
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={handleNext}
-              className="mt-6 w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-semibold"
-            >
-              {currentQuestion < currentQuiz.questions.length - 1 ? 'Next' : 'Submit Quiz'}
-            </button>
+          <p className="mb-4 text-gray-700">
+            Question {currentQuestion + 1} / {currentQuiz.questions.length}
+          </p>
+
+          <h3 className="font-semibold mb-4">{question.question}</h3>
+
+          <div className="space-y-3">
+            {question.options.map((opt, i) => (
+              <button
+                key={i}
+                onClick={() => setSelectedAnswer(i)}
+                className={`w-full text-left p-3 rounded border transition ${
+                  selectedAnswer === i
+                    ? "bg-blue-100 border-blue-500"
+                    : "border-gray-300 hover:border-gray-400"
+                }`}
+              >
+                {opt}
+              </button>
+            ))}
           </div>
+
+          <button
+            onClick={handleNext}
+            className="mt-6 w-full bg-blue-600 text-white py-2 rounded"
+          >
+            {currentQuestion + 1 === currentQuiz.questions.length
+              ? "Submit Quiz"
+              : "Next"}
+          </button>
         </div>
       </div>
     );
   }
 
+  /* ===== QUIZ LIST ===== */
   return (
-    <div className="min-h-screen w-full">
-      <div className="w-full max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-5 lg:py-6">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Quiz</h1>
-          <Link
-            to="/leaderboard"
-            className="flex items-center gap-2 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition"
-          >
-            <FiAward /> Leaderboard
-          </Link>
-        </div>
+    <div className="min-h-screen bg-gray-100 p-6">
+      <div className="max-w-6xl mx-auto">
+        <h1 className="text-3xl font-bold mb-6">Quizzes</h1>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {quizzes.map((quiz) => (
-            <div key={quiz._id} className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 sm:p-6">
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{quiz.title}</h3>
-              <p className="text-gray-600 dark:text-gray-400 text-sm mb-4">{quiz.description}</p>
-              <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400 mb-4">
+            <div
+              key={quiz._id}
+              className="bg-white rounded-lg shadow p-5"
+            >
+              <h3 className="font-semibold text-lg mb-2">{quiz.title}</h3>
+              <p className="text-gray-600 mb-3">{quiz.description}</p>
+
+              <div className="flex justify-between items-center text-sm mb-3">
                 <span className="flex items-center gap-1">
                   <FiClock /> {quiz.duration} min
                 </span>
                 <span>{quiz.questions.length} questions</span>
               </div>
+
               <button
                 onClick={() => startQuiz(quiz._id)}
-                disabled={quizLoading}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+                className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
               >
-                <FiPlay /> Start Quiz
+                <FiPlay className="inline mr-2" />
+                Start Quiz
               </button>
             </div>
           ))}
-          {quizzes.length === 0 && (
-            <div className="col-span-full text-center py-12">
-              <p className="text-gray-500 dark:text-gray-400">No quizzes available yet</p>
-            </div>
-          )}
         </div>
       </div>
     </div>
   );
 }
-

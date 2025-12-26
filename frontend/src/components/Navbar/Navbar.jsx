@@ -53,7 +53,7 @@ function PomodoroTimer() {
   };
 
   return (
-    <div className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 rounded-lg bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/30 dark:to-purple-900/30 border border-blue-200 dark:border-blue-800">
+    <div className="flex items-center gap-1.5 sm:gap-2 px-3 py-1 rounded-lg bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/30 dark:to-purple-900/30 border border-blue-200 dark:border-blue-800">
       <div className="flex items-center gap-2">
         <span className="text-lg">⏱️</span>
         <span className="text-blue-700 dark:text-blue-300 text-xs sm:text-sm font-mono font-semibold">
@@ -96,7 +96,7 @@ export default function Navbar() {
 
   return (
     <nav className="w-full bg-white dark:bg-gray-800 shadow-md sticky top-0 z-50 border-b border-gray-200 dark:border-gray-700">
-      <div className="w-full px-3 sm:px-6 flex items-center justify-between h-14 sm:h-16 ml-2">
+      <div className="w-full px-3 sm:px-6 flex items-center justify-between h-14 sm:h-12 ml-2">
         {/* Logo */}
         <div className="flex items-center flex-shrink-0">
           <Link to="/dashboard" className="flex items-center">

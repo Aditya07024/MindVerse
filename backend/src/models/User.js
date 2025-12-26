@@ -1,67 +1,44 @@
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 
-const fileSchema = new mongoose.Schema({
-  filename: {
-    type: String,
-    required: [true, "Filename is required"],
-    trim: true,
-  },
-  firebaseUrl: {
-    type: String,
-    required: [true, "Firebase URL is required"],
-  },
-  fileType: {
-    type: String,
-    default: "unknown",
-  },
-  fileSize: {
-    type: Number,
-    default: 0,
-  },
-  uploadedAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
+const userSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
 
-const userSchema = new mongoose.Schema({
-  username: {
-    type: String,
-    required: [true, "Username is required"],
-    trim: true,
-    minlength: [3, "Username must be at least 3 characters"],
-  },
-  email: {
-  type: String,
-  required: true,
-  unique: true,   // <-- THIS creates a unique index in MongoDB
-},
-  password: {
-    type: String,
-    required: [true, "Password is required"],
-    minlength: [6, "Password must be at least 6 characters"],
-    select: false,
-  },
-  files: [fileSchema],
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+    },
 
-// Update timestamp
-userSchema.pre("save", function (next) {
-  this.updatedAt = Date.now();
+    password: {
+      type: String,
+      required: true,
+      select: false,
+    },
+
+    college: {
+      type: String,
+    },
+  },
+  { timestamps: true }
+);
+
+// Hash password before save
+userSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) return next();
+  this.password = await bcrypt.hash(this.password, 10);
   next();
 });
 
-// Remove manual indexes — these caused duplicates
-// userSchema.index({ email: 1 });
-// userSchema.index({ username: 1 });
-userSchema.index({ "files.uploadedAt": -1 }); // keep this one
+// Compare password
+userSchema.methods.comparePassword = function (password) {
+  return bcrypt.compare(password, this.password);
+};
 
 module.exports = mongoose.model("User", userSchema);

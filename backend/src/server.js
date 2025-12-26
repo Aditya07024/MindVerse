@@ -1,43 +1,27 @@
 const http = require("http");
-const { Server } = require("socket.io");
+const app = require("./app");
+const connectDB = require("./config/db");
 require("dotenv").config();
 
-const app = require("./app");
-const { connectDB } = require("./config/database");
+// 🔑 CONNECT DATABASE FIRST
+connectDB();
 
-const PORT = process.env.PORT || 5000;
-
-// Create http server for socket.io
 const server = http.createServer(app);
 
-// Socket.io setup
+// OPTIONAL: Socket.IO (only if you really need it)
+const { Server } = require("socket.io");
 const io = new Server(server, {
   cors: {
-    origin: process.env.CORS_ORIGIN || "*",
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    origin: "*",
   },
 });
 
 io.on("connection", (socket) => {
-  console.log("✓ User connected to Socket.io:", socket.id);
-  socket.on("disconnect", () => console.log("✗ User disconnected:", socket.id));
+  console.log("🔌 Socket connected:", socket.id);
 });
 
-// Start server
-const startServer = async () => {
-  try {
-    // Connect to PostgreSQL
-    await connectDB();
-
-    // Start HTTP server
-    server.listen(PORT, () => {
-      console.log(`✓ Server running on http://localhost:${PORT}`);
-      console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
-    });
-  } catch (err) {
-    console.error("✗ Failed to start server:", err.message);
-    process.exit(1);
-  }
-};
-
-startServer();
+// START SERVER
+const PORT = process.env.PORT || 5001;
+server.listen(PORT, () => {
+  console.log(`✅ Server running on http://localhost:${PORT}`);
+});

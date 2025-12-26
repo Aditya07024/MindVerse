@@ -14,6 +14,7 @@ import Error404 from "./components/Error404/Error404";
 import ErrorBoundary from "./components/ErrorBoundary/ErrorBoundary";
 import Layout from "./components/Layout/Layout";
 
+
 // Pages
 import Landing from "./pages/Landing/Landing";
 import Login from "./pages/Login/Login";
@@ -126,15 +127,15 @@ function App() {
                     }
                   />
                   <Route
-                    path="/quiz"
-                    element={
-                      <ProtectedRoute>
-                        <Layout>
-                          <Quiz />
-                        </Layout>
-                      </ProtectedRoute>
-                    }
-                  />
+  path="/quiz/:fileId"
+  element={
+    <ProtectedRoute>
+      <Layout>
+        <Quiz />
+      </Layout>
+    </ProtectedRoute>
+  }
+/>
                   <Route
                     path="/profile"
                     element={

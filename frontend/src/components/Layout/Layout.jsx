@@ -1,17 +1,29 @@
-import Sidebar from '../Sidebar/Sidebar';
-import Navbar from '../Navbar/Navbar';
-import ChatBot from '../ChatBot/ChatBot';
+import Sidebar from "../Sidebar/Sidebar";
+import Navbar from "../Navbar/Navbar";
+import ChatBot from "../ChatBot/ChatBot";
 
 export default function Layout({ children }) {
   return (
-    <div className="w-full overflow-x-hidden">
+    <div className="h-screen w-full overflow-hidden flex">
+      
+      {/* Sidebar */}
       <Sidebar />
-      <Navbar />
-      <main className="ml-20 pt-14 sm:pt-16 min-h-screen bg-dashboard-bg w-full">
-        {children}
-      </main>
+
+      {/* Right Side Content */}
+      <div className="flex flex-col flex-1 overflow-hidden">
+
+        {/* Navbar */}
+        <Navbar />
+
+        {/* Page Content */}
+        <main className="flex-1 overflow-hidden bg-dashboard-bg relative">
+          {children}
+        </main>
+
+      </div>
+
+      {/* Floating chatbot */}
       <ChatBot />
     </div>
   );
 }
-
