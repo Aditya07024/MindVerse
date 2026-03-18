@@ -12,7 +12,13 @@ import {
 } from "react-icons/fi";
 import { Rnd } from "react-rnd";
 
-export default function Window({ data, onClose, onUpdate, onAction, children }) {
+export default function Window({
+  data,
+  onClose,
+  onUpdate,
+  onAction,
+  children,
+}) {
   const { id, title, position, size, maximized } = data;
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -50,7 +56,6 @@ export default function Window({ data, onClose, onUpdate, onAction, children }) 
         <span className="truncate font-medium">{title}</span>
 
         <div className="flex items-center gap-2 relative">
-
           {/* Dropdown menu */}
           <button
             onClick={() => setMenuOpen((p) => !p)}
@@ -64,13 +69,6 @@ export default function Window({ data, onClose, onUpdate, onAction, children }) 
               ref={menuRef}
               className="absolute right-0 top-9 w-44 bg-gray-900 border border-gray-700 rounded shadow-lg z-50"
             >
-              <button
-                onClick={() => onAction("summary", data)}
-                className="flex items-center gap-2 w-full px-3 py-2 hover:bg-gray-700"
-              >
-                <FiFileText /> Summary
-              </button>
-
               <button
                 onClick={() => onAction("notes", data)}
                 className="flex items-center gap-2 w-full px-3 py-2 hover:bg-gray-700"
@@ -86,6 +84,33 @@ export default function Window({ data, onClose, onUpdate, onAction, children }) 
               </button>
             </div>
           )}
+          {/* Summarize (in-window) - only enabled when text extracted */}
+          <button
+            onClick={() => onAction && onAction("generateSummary", data, id)}
+            disabled={
+              data.ocrPending ||
+              !data.text ||
+              (data.text && data.text.length < 200)
+            }
+            className={`p-1 rounded ${
+              data.ocrPending ||
+              !data.text ||
+              (data.text && data.text.length < 200)
+                ? "opacity-50 cursor-not-allowed bg-gray-700"
+                : "hover:bg-gray-700"
+            }`}
+            title={
+              data.ocrPending
+                ? "Extracting text..."
+                : !data.text
+                ? "Text not extracted yet"
+                : data.text && data.text.length < 200
+                ? "Extracted text too short to summarize"
+                : "Generate Summary"
+            }
+          >
+            Sum
+          </button>
 
           {/* Layout buttons */}
           <button
@@ -121,9 +146,7 @@ export default function Window({ data, onClose, onUpdate, onAction, children }) 
       </div>
 
       {/* CONTENT */}
-      <div className="h-[calc(100%-42px)] overflow-auto">
-        {children}
-      </div>
+      <div className="h-[calc(100%-42px)] overflow-auto">{children}</div>
     </Rnd>
   );
 }

@@ -1,5 +1,7 @@
 from flask import Flask, request, jsonify
 from transformers import pipeline
+import traceback
+import json as _json
 
 app = Flask(__name__)
 
@@ -8,8 +10,8 @@ print("⏳ Loading summarization model...")
 # Lightweight & accurate summarizer
 summarizer = pipeline(
     "summarization",
-    model="facebook/bart-large-cnn",
-    device=-1  # CPU only (safe for Mac M1)
+    model="sshleifer/distilbart-cnn-12-6",
+    device=-1
 )
 
 print("🚀 Summarizer ready!")
@@ -17,7 +19,21 @@ print("🚀 Summarizer ready!")
 @app.route("/summarize", methods=["POST"])
 def summarize():
     try:
-        data = request.get_json()
+        raw = request.get_data(as_text=True)
+        print("📥 /summarize raw length:", len(raw))
+        # try to parse JSON safely
+        data = request.get_json(silent=True)
+        if data is None:
+            try:
+                data = _json.loads(raw)
+            except Exception as pe:
+                print("❌ Failed to parse JSON body:", pe)
+                traceback.print_exc()
+                return jsonify({
+                    "success": False,
+                    "error": "Invalid JSON in request"
+                }), 400
+
         text = data.get("text")
 
         if not text or len(text.strip()) < 50:
@@ -26,18 +42,23 @@ def summarize():
                 "error": "Text too short to summarize"
             }), 400
 
-        # Chunk long text safely
-        max_chunk = 900
+        # Chunk long text safely (split by characters). Adjust max_chunk if CPU is slow.
+        max_chunk = 1200
         chunks = [text[i:i+max_chunk] for i in range(0, len(text), max_chunk)]
 
         summaries = []
-        for chunk in chunks:
+        import time
+        for idx, chunk in enumerate(chunks):
+            print(f"🔄 [SUMMARIZER] Processing chunk {idx+1}/{len(chunks)} length={len(chunk)}")
+            start = time.time()
             result = summarizer(
                 chunk,
-                max_length=150,
-                min_length=60,
+                max_length=120,
+                min_length=40,
                 do_sample=False
             )
+            took = time.time() - start
+            print(f"✅ [SUMMARIZER] Chunk {idx+1} done in {took:.1f}s")
             summaries.append(result[0]["summary_text"])
 
         final_summary = " ".join(summaries)
@@ -48,6 +69,8 @@ def summarize():
         })
 
     except Exception as e:
+        print("❌ Exception in /summarize:", e)
+        traceback.print_exc()
         return jsonify({
             "success": False,
             "error": str(e)

@@ -7,7 +7,11 @@ import FilesModal from "./FilesModal";
 import Window from "../../components/DraggableComponents/Window";
 import Loading from "../../components/Loading/Loading";
 
-import { generateSummary } from "../../utils/summaryApi";
+import {
+  generateSummary,
+  extractTextOnly,
+  getSummaryByFileId,
+} from "../../utils/summaryApi";
 import {
   uploadToCloudinary,
   saveFileUrlToDatabase,
@@ -61,8 +65,76 @@ export default function Summarizer() {
         layout: "normal",
         position: { x: 100 + prev.length * 40, y: 80 },
         size: { width: 600, height: 500 },
+        ocrPending: true,
+        text: null,
+        summary: null,
       },
     ]);
+    // Kick off OCR extraction in background if not already present
+    (async () => {
+      try {
+        const res = await getSummaryByFileId(file._id);
+        const doc = res?.data;
+        if (doc && doc.text) {
+          // already has OCR text — keep saved summary in its own window
+          // Do NOT attach `summary` to the PDF window so both PDF and
+          // summary can be visible simultaneously.
+          updateWindow(file._id, { ocrPending: false, text: doc.text });
+
+          // If summary already saved, cache it for quick access; otherwise
+          // start background summary generation and save result to DB.
+          if (doc.summary) {
+            setSummaryData((prev) => ({ ...prev, [file._id]: doc.summary }));
+          } else {
+            // mark pending and run generation in background (non-blocking)
+            updateWindow(file._id, { summaryPending: true });
+            (async () => {
+              try {
+                const gen = await generateSummary(file._id);
+                setSummaryData((prev) => ({
+                  ...prev,
+                  [file._id]: gen.summary,
+                }));
+              } catch (err) {
+                console.error("Background summary failed", err);
+              } finally {
+                updateWindow(file._id, { summaryPending: false });
+              }
+            })();
+          }
+        } else {
+          // start extraction in background
+          updateWindow(file._id, { ocrPending: true });
+          const ex = await extractTextOnly({
+            fileId: file._id,
+            fileUrl: file.fileUrl,
+            userId,
+          });
+          updateWindow(file._id, { ocrPending: false, text: ex.text });
+
+          // Kick off background summary generation if extracted text is long enough
+          if (ex?.text && ex.text.length >= 200) {
+            updateWindow(file._id, { summaryPending: true });
+            (async () => {
+              try {
+                const gen = await generateSummary(file.file._id || file._id);
+                setSummaryData((prev) => ({
+                  ...prev,
+                  [file._id]: gen.summary,
+                }));
+              } catch (err) {
+                console.error("Background summary failed", err);
+              } finally {
+                updateWindow(file._id, { summaryPending: false });
+              }
+            })();
+          }
+        }
+      } catch (err) {
+        console.error("Background OCR failed", err);
+        updateWindow(file._id, { ocrPending: false });
+      }
+    })();
   };
 
   const closeWindow = (id) => {
@@ -108,46 +180,120 @@ export default function Summarizer() {
       }))
     );
   };
-const handleAction = async (type, file) => {
-  const id = `${type}-${file._id}`;
+  const handleAction = async (type, fileOrData, winId) => {
+    // generate summary inside an existing window
+    if (type === "generateSummary") {
+      // fileOrData may be window data or a file object
+      const data = fileOrData || {};
+      const file = data.file || data;
+      const summaryId = `summary-${file._id}`;
 
-  if (windows.some(w => w.id === id)) return;
+      // open a separate summary window (or reuse if exists)
+      if (!windows.some((w) => w.id === summaryId)) {
+        setWindows((prev) => [
+          ...prev,
+          {
+            id: summaryId,
+            title: `Summary - ${file.filename}`,
+            file,
+            type: "summary",
+            position: data.position
+              ? { x: data.position.x + 30, y: data.position.y + 30 }
+              : { x: 140, y: 140 },
+            size: { width: 520, height: 420 },
+            layout: "normal",
+            summaryLoading: true,
+            summary: null,
+            text: null,
+          },
+        ]);
+      } else {
+        updateWindow(summaryId, { summaryLoading: true });
+      }
 
-  // 👉 QUIZ OPENS IN NEW TAB
-  if (type === "quiz") {
-    window.open(`/quiz?fileId=${file._id}`, "_blank");
-    return;
-  }
+      try {
+        // check if summary already saved
+        const saved = await getSummaryByFileId(file._id);
+        const doc = saved?.data;
+        if (doc && doc.summary) {
+          updateWindow(summaryId, {
+            summary: doc.summary,
+            text: doc.text,
+            summaryLoading: false,
+            showSummary: true,
+          });
+          setSummaryData((prev) => ({ ...prev, [file._id]: doc.summary }));
+          return;
+        }
 
-  // 👉 SUMMARY / NOTES
-  setWindows(prev => [
-    ...prev,
-    {
-      id,
-      title: `${type.toUpperCase()} - ${file.filename}`,
-      file,
-      type,
-      position: { x: 120, y: 120 },
-      size: { width: 520, height: 420 },
-      layout: "normal",
-    },
-  ]);
+        // if OCR text exists but is too short, inform user
+        if (doc && doc.text && doc.text.length < 200) {
+          updateWindow(summaryId, {
+            summaryLoading: false,
+            summary: "Extracted text is too short to summarize.",
+          });
+          toast.error("Extracted text is too short to summarize.");
+          return;
+        }
 
-  if (type === "summary") {
-    setSummaryLoading(true);
-    try {
-      const res = await generateSummary(file._id);
-      setSummaryData(prev => ({
-        ...prev,
-        [file._id]: res.summary,
-      }));
-    } catch (err) {
-      toast.error("Failed to generate summary");
-    } finally {
-      setSummaryLoading(false);
+        // otherwise request generation (this will run OCR if needed)
+        const res = await generateSummary(file._id);
+        updateWindow(summaryId, {
+          summary: res.summary,
+          text: res.text,
+          summaryLoading: false,
+          showSummary: true,
+        });
+        setSummaryData((prev) => ({ ...prev, [file._id]: res.summary }));
+      } catch (err) {
+        console.error(err);
+        updateWindow(summaryId, { summaryLoading: false });
+        toast.error(
+          err?.response?.data?.message || "Failed to generate summary"
+        );
+      }
+      return;
     }
-  }
-};
+
+    // For other actions (notes, quiz), fileOrData is the file
+    const file = fileOrData;
+
+    const id = `${type}-${file._id}`;
+
+    if (windows.some((w) => w.id === id)) return;
+
+    // 👉 QUIZ OPENS IN NEW TAB
+    if (type === "quiz") {
+      window.open(`/quiz?fileId=${file._id}`, "_blank");
+      return;
+    }
+
+    // 👉 SUMMARY / NOTES (open a new helper window)
+    setWindows((prev) => [
+      ...prev,
+      {
+        id,
+        title: `${type.toUpperCase()} - ${file.filename}`,
+        file,
+        type,
+        position: { x: 120, y: 120 },
+        size: { width: 520, height: 420 },
+        layout: "normal",
+      },
+    ]);
+
+    if (type === "summary") {
+      setSummaryLoading(true);
+      try {
+        const res = await generateSummary(file._id);
+        setSummaryData((prev) => ({ ...prev, [file._id]: res.summary }));
+      } catch (err) {
+        toast.error("Failed to generate summary");
+      } finally {
+        setSummaryLoading(false);
+      }
+    }
+  };
   /* ================== UPLOAD ================== */
 
   const handleUpload = async () => {
@@ -156,13 +302,7 @@ const handleAction = async (type, file) => {
     setUploading(true);
     try {
       const url = await uploadToCloudinary(file);
-      await saveFileUrlToDatabase(
-        userId,
-        file.name,
-        url,
-        file.type,
-        file.size
-      );
+      await saveFileUrlToDatabase(userId, file.name, url, file.type, file.size);
 
       toast.success("Uploaded");
       setFile(null);
@@ -180,7 +320,6 @@ const handleAction = async (type, file) => {
 
   return (
     <div className="h-[calc(100vh-64px)] overflow-hidden bg-gray-100 p-6">
-
       {/* HEADER */}
       <div className="flex gap-4 mb-4 ml-10">
         <h1 className="text-3xl font-bold">Smart Summarizer</h1>
@@ -188,7 +327,11 @@ const handleAction = async (type, file) => {
         <label className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded cursor-pointer">
           <FiUpload />
           Upload
-          <input type="file" hidden onChange={(e) => setFile(e.target.files[0])} />
+          <input
+            type="file"
+            hidden
+            onChange={(e) => setFile(e.target.files[0])}
+          />
         </label>
 
         <button
@@ -214,49 +357,65 @@ const handleAction = async (type, file) => {
       {/* WINDOWS */}
       {windows.map((win) => (
         <Window
-  key={win.id}
-  data={win}
-  onClose={closeWindow}
-  onUpdate={updateWindow}
-  onAction={handleAction}
->
+          key={win.id}
+          data={win}
+          onClose={closeWindow}
+          onUpdate={updateWindow}
+          onAction={handleAction}
+        >
           {win.type === "summary" && (
-  <div className="p-4 text-gray-800 dark:text-white h-full overflow-auto">
-    <h2 className="text-lg font-bold mb-3">📄 Summary</h2>
+            <div className="p-4 text-gray-800 dark:text-white h-full overflow-auto">
+              <h2 className="text-lg font-bold mb-3">📄 Summary</h2>
 
-    {summaryLoading ? (
-      <p className="animate-pulse text-gray-500">Generating summary...</p>
-    ) : (
-      <p className="whitespace-pre-wrap leading-relaxed">
-        {summaryData[win.file._id] || "No summary generated yet."}
-      </p>
-    )}
-  </div>
-)}
+              {win.summaryLoading ? (
+                <p className="animate-pulse text-gray-500">
+                  Generating summary...
+                </p>
+              ) : (
+                <p className="whitespace-pre-wrap leading-relaxed">
+                  {win.summary ||
+                    summaryData[win.file._id] ||
+                    "No summary generated yet."}
+                </p>
+              )}
+            </div>
+          )}
 
-{win.type === "notes" && (
-  <div className="p-4 text-gray-800 dark:text-white">
-    <h2 className="text-lg font-bold mb-2">Notes</h2>
-    <textarea
-      className="w-full h-[250px] p-2 border rounded"
-      placeholder="Write your notes here..."
-    />
-  </div>
-)}
+          {win.type === "notes" && (
+            <div className="p-4 text-gray-800 dark:text-white">
+              <h2 className="text-lg font-bold mb-2">Notes</h2>
+              <textarea
+                className="w-full h-[250px] p-2 border rounded"
+                placeholder="Write your notes here..."
+              />
+            </div>
+          )}
 
-{!win.type && (
-  win.file.fileType.startsWith("image/") ? (
-    <img
-      src={win.file.fileUrl}
-      className="w-full h-full object-contain"
-    />
-  ) : (
-    <SmartPDFViewer
-      fileUrl={win.file.fileUrl}
-      fileId={win.file._id}
-    />
-  )
-)}
+          {!win.type &&
+            (win.file.fileType.startsWith("image/") ? (
+              <img
+                src={win.file.fileUrl}
+                className="w-full h-full object-contain"
+              />
+            ) : win.showSummary || win.summary ? (
+              <div className="p-4 text-gray-800 dark:text-white h-full overflow-auto">
+                <h2 className="text-lg font-bold mb-3">📄 Summary</h2>
+                {win.summaryLoading ? (
+                  <p className="animate-pulse text-gray-500">
+                    Generating summary...
+                  </p>
+                ) : (
+                  <p className="whitespace-pre-wrap leading-relaxed">
+                    {win.summary || "No summary generated yet."}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <SmartPDFViewer
+                fileUrl={win.file.fileUrl}
+                fileId={win.file._id}
+              />
+            ))}
         </Window>
       ))}
 
