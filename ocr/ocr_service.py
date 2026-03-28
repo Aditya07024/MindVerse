@@ -32,6 +32,14 @@ def extract_text_from_image(path):
     text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
     return text.strip()
 
+# ---------- HEALTH CHECK ----------
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({
+        "status": "✅ OCR Service is alive",
+        "timestamp": str(__import__('datetime').datetime.now().isoformat())
+    })
+
 # ---------- API ----------
 @app.route("/ocr", methods=["POST"])
 def ocr():
@@ -76,5 +84,6 @@ def ocr():
 
 
 if __name__ == "__main__":
-    print("🚀 OCR service running at http://127.0.0.1:7000")
-    app.run(port=7000)
+    port = int(os.environ.get("PORT", 5000))
+    print(f"🚀 OCR service running at http://0.0.0.0:{port}")
+    app.run(host="0.0.0.0", port=port)

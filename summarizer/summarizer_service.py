@@ -16,6 +16,15 @@ summarizer = pipeline(
 
 print("🚀 Summarizer ready!")
 
+# 🏥 HEALTH CHECK ENDPOINT (Keep-alive for Render free tier)
+@app.route("/health", methods=["GET"])
+def health():
+    import datetime
+    return jsonify({
+        "status": "✅ Summarizer Service is alive",
+        "timestamp": datetime.datetime.now().isoformat()
+    })
+
 @app.route("/summarize", methods=["POST"])
 def summarize():
     try:
@@ -78,5 +87,7 @@ def summarize():
 
 
 if __name__ == "__main__":
-    print("🚀 Summarizer running at http://127.0.0.1:7100")
-    app.run(port=7100)
+    import os
+    port = int(os.environ.get("PORT", 5001))
+    print(f"🚀 Summarizer running at http://0.0.0.0:{port}")
+    app.run(host="0.0.0.0", port=port)

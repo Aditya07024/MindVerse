@@ -1,0 +1,56 @@
+services:
+  - type: web
+    name: mindverse-backend
+    runtime: node
+    plan: free
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mindverse-db
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: OCR_SERVICE_URL
+        value: http://mindverse-ocr-service.render.internal:5000
+      - key: SUMMARIZER_SERVICE_URL
+        value: http://mindverse-summarizer-service.render.internal:5001
+      - key: FIREBASE_CONFIG
+        sync: false
+
+  - type: web
+    name: mindverse-ocr-service
+    runtime: python-3
+    plan: free
+    buildCommand: cd ocr && pip install -r requirements.txt
+    startCommand: cd ocr && python ocr_service.py
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: PORT
+        value: 5000
+
+  - type: web
+    name: mindverse-summarizer-service
+    runtime: python-3
+    plan: free
+    buildCommand: cd summarizer && pip install -r requirements.txt
+    startCommand: cd summarizer && python summarizer_service.py
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: PORT
+        value: 5001
+
+databases:
+  - name: mindverse-db
+    databaseName: mindverse
