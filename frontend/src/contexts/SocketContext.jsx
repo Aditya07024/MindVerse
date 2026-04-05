@@ -18,12 +18,18 @@ export const SocketProvider = ({ children }) => {
 
   useEffect(() => {
     if (isAuthenticated && user) {
+      const apiBaseUrl =
+        import.meta.env.VITE_API_BASE_URL ||
+        import.meta.env.VITE_API_URL ||
+        "http://localhost:5001/api";
+      const derivedSocketUrl = apiBaseUrl.replace(/\/api\/?$/, "");
       const socketUrl =
-        import.meta.env.VITE_SOCKET_URL || "http://localhost:5001";
+        import.meta.env.VITE_SOCKET_URL || derivedSocketUrl;
       const newSocket = io(socketUrl, {
         auth: {
           token: localStorage.getItem("token"),
         },
+        transports: ["websocket", "polling"],
       });
 
       newSocket.on("connect", () => {
