@@ -1,6 +1,6 @@
 /**
  * Health Check Pinger - Keeps Render free tier services alive
- * Pings /health endpoint every 5 minutes to prevent service sleep
+ * Pings the backend /health endpoint every 5 minutes to prevent service sleep
  *
  * Usage: node keepAlive.js
  * Or add to Render as a Background Worker with cron
@@ -8,23 +8,10 @@
 
 require("dotenv").config();
 
-// Service URLs to keep alive
 const SERVICES = [
   {
     name: "Backend",
     url: process.env.BACKEND_URL || "https://mindverse-backend.onrender.com",
-  },
-  {
-    name: "OCR Service",
-    url:
-      process.env.OCR_SERVICE_URL ||
-      "https://mindverse-ocr-service.onrender.com",
-  },
-  {
-    name: "Summarizer Service",
-    url:
-      process.env.SUMMARIZER_SERVICE_URL ||
-      "https://mindverse-summarizer-service.onrender.com",
   },
 ];
 

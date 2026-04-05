@@ -26,7 +26,8 @@ const summarySchema = new mongoose.Schema(
 
     summaryType: {
       type: String,
-      enum: ["short", "detailed", "bullet"],
+      enum: ["short", "detailed", "bullet", "exam"],
+      default: "detailed",
     },
   },
   { timestamps: true }

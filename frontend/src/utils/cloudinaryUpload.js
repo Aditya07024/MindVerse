@@ -70,9 +70,10 @@ export const saveFileUrlToDatabase = async (
    GET ALL FILES FOR USER
    (⚠️ FIXED ROUTE)
    ========================================================= */
-export const getUserFiles = async (userId) => {
+export const getUserFiles = async (userId, params = {}) => {
   const response = await axios.get(
-    `${API_BASE_URL}/files/user/${userId}`
+    `${API_BASE_URL}/files/user/${userId}`,
+    { params }
   );
   return response.data;
 };

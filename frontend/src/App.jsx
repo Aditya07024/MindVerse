@@ -127,6 +127,16 @@ function App() {
                     }
                   />
                   <Route
+                    path="/quiz"
+                    element={
+                      <ProtectedRoute>
+                        <Layout>
+                          <Quiz />
+                        </Layout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
   path="/quiz/:fileId"
   element={
     <ProtectedRoute>

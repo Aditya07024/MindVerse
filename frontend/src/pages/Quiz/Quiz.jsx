@@ -7,6 +7,8 @@ import Loading from "../../components/Loading/Loading";
 
 export default function Quiz() {
   const { fileId } = useParams(); // 👈 from route
+  const validFileId =
+    fileId && fileId !== "undefined" ? fileId : null;
   const [quizzes, setQuizzes] = useState([]);
   const [currentQuiz, setCurrentQuiz] = useState(null);
   const [currentQuestion, setCurrentQuestion] = useState(0);
@@ -14,6 +16,7 @@ export default function Quiz() {
   const [answers, setAnswers] = useState([]);
   const [timeLeft, setTimeLeft] = useState(0);
   const [score, setScore] = useState(null);
+  const [selectedDifficulty, setSelectedDifficulty] = useState("medium");
   const [loading, setLoading] = useState(true);
   const [quizLoading, setQuizLoading] = useState(false);
 
@@ -21,16 +24,28 @@ export default function Quiz() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const res = await api.get("/quiz");
+        const res = await api.get("/quiz", {
+          params: validFileId ? { fileId: validFileId } : {},
+        });
         setQuizzes(res.data || []);
-      } catch {
-        toast.error("Failed to load quizzes");
+
+        if (validFileId && (!res.data || res.data.length === 0)) {
+          const generated = await api.post("/quiz/generate", {
+            fileId: validFileId,
+            difficulty: selectedDifficulty,
+          });
+          setQuizzes([generated.data.quiz]);
+        }
+      } catch (error) {
+        toast.error(
+          error?.response?.data?.message || "Failed to load quizzes"
+        );
       } finally {
         setLoading(false);
       }
     };
     fetch();
-  }, []);
+  }, [validFileId, selectedDifficulty]);
 
   /* ================= TIMER ================= */
   useEffect(() => {
@@ -54,8 +69,10 @@ export default function Quiz() {
       setAnswers([]);
       setScore(null);
       setTimeLeft(res.data.duration * 60);
-    } catch {
-      toast.error("Failed to start quiz");
+    } catch (error) {
+      toast.error(
+        error?.response?.data?.message || "Failed to start quiz"
+      );
     } finally {
       setQuizLoading(false);
     }
@@ -86,8 +103,10 @@ export default function Quiz() {
       });
       setScore(res.data);
       setCurrentQuiz(null);
-    } catch {
-      toast.error("Failed to submit quiz");
+    } catch (error) {
+      toast.error(
+        error?.response?.data?.message || "Failed to submit quiz"
+      );
     }
   };
 
@@ -110,6 +129,31 @@ export default function Quiz() {
           <p className="text-green-600 font-semibold">
             Accuracy: {score.accuracy}%
           </p>
+
+          {Array.isArray(score.review) && score.review.length > 0 && (
+            <div className="mt-6 text-left space-y-4">
+              <h3 className="font-semibold text-lg">Review</h3>
+              {score.review.map((item, index) => (
+                <div key={index} className="border rounded-lg p-4">
+                  <p className="font-medium mb-2">{item.question}</p>
+                  <p className={item.isCorrect ? "text-green-600" : "text-red-600"}>
+                    Your answer:{" "}
+                    {item.selectedAnswer !== null
+                      ? item.options[item.selectedAnswer]
+                      : "No answer"}
+                  </p>
+                  {!item.isCorrect && (
+                    <p className="text-green-700">
+                      Correct answer: {item.options[item.correctAnswer]}
+                    </p>
+                  )}
+                  {item.explanation && (
+                    <p className="text-gray-600 mt-2">{item.explanation}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="mt-6 flex gap-3 justify-center">
             <button
@@ -185,6 +229,18 @@ export default function Quiz() {
     <div className="min-h-screen bg-gray-100 p-6">
       <div className="max-w-6xl mx-auto">
         <h1 className="text-3xl font-bold mb-6">Quizzes</h1>
+        <div className="mb-4">
+          <label className="mr-2 text-sm font-medium">Difficulty</label>
+          <select
+            value={selectedDifficulty}
+            onChange={(e) => setSelectedDifficulty(e.target.value)}
+            className="border rounded px-3 py-2 bg-white"
+          >
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+          </select>
+        </div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {quizzes.map((quiz) => (
@@ -201,6 +257,14 @@ export default function Quiz() {
                 </span>
                 <span>{quiz.questions.length} questions</span>
               </div>
+              <div className="text-sm text-gray-500 mb-3">
+                Difficulty: {quiz.difficulty || "medium"} | Attempts: {quiz.attemptsCount || 0}
+              </div>
+              {quiz.latestAttempt && (
+                <div className="text-xs text-gray-500 mb-3">
+                  Last score: {quiz.latestAttempt.score}/{quiz.latestAttempt.total} ({quiz.latestAttempt.accuracy}%)
+                </div>
+              )}
 
               <button
                 onClick={() => startQuiz(quiz._id)}

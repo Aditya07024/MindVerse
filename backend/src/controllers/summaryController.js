@@ -3,126 +3,99 @@ const { generateSummary } = require("../../services/summaryService");
 const Summary = require("../models/Summary");
 const { File } = require("../models");
 
-// Generate summary (will attempt to read fileUrl/userId from body,
-// or fallback to lookup the File record by fileId)
+async function resolveFilePayload({ userId, fileId, fileUrl, fileType, filename }) {
+  if (userId && fileUrl) {
+    return { userId, fileId, fileUrl, fileType, filename };
+  }
+
+  if (!fileId) {
+    throw new Error("fileId is required");
+  }
+
+  const fileDoc = await File.findById(fileId);
+  if (!fileDoc) {
+    const error = new Error("File not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return {
+    userId: userId || fileDoc.userId,
+    fileId,
+    fileUrl: fileUrl || fileDoc.fileUrl,
+    fileType: fileType || fileDoc.fileType,
+    filename: filename || fileDoc.filename,
+  };
+}
+
 exports.generateAndSaveSummary = async (req, res) => {
   try {
-    console.log("📊 [SUMMARY] generateAndSaveSummary called with:", req.body);
-    let { userId, fileId, fileUrl } = req.body;
+    const payload = await resolveFilePayload(req.body);
+    const existing = payload.fileId
+      ? await Summary.findOne({ fileId: payload.fileId })
+      : null;
+    const summaryType = req.body.summaryType || existing?.summaryType || "detailed";
 
-    // If client requests synchronous behavior (for debugging), allow it
-    const sync = req.query && req.query.sync === "true";
-
-    if (!fileUrl || !userId) {
-      // try to lookup file
-      console.log("📊 [SUMMARY] Looking up file with fileId:", fileId);
-      const fileDoc = await File.findById(fileId);
-      if (!fileDoc) {
-        console.log("❌ [SUMMARY] File not found:", fileId);
-        return res
-          .status(404)
-          .json({ success: false, message: "File not found" });
-      }
-      fileUrl = fileUrl || fileDoc.fileUrl;
-      userId = userId || fileDoc.userId;
-      console.log("📊 [SUMMARY] Found file. URL:", fileUrl, "UserID:", userId);
+    let text = (req.body.text || existing?.text || "").trim();
+    if (!text) {
+      text = await extractText({
+        fileUrl: payload.fileUrl,
+        fileType: payload.fileType,
+        filename: payload.filename,
+      });
     }
 
-    if (sync) {
-      // Run the existing synchronous flow (may be memory heavy)
-      console.log("🔄 [SUMMARY] (sync) Starting OCR extraction...");
-      const text = await extractText({ fileUrl });
-      console.log(
-        "✅ [SUMMARY] (sync) OCR extraction completed. Text length:",
-        text.length
-      );
+    const summary = await generateSummary(text, { summaryType });
 
-      console.log("🔄 [SUMMARY] (sync) Starting summary generation...");
-      const summary = await generateSummary(text);
-      console.log(
-        "✅ [SUMMARY] (sync) Summary generation completed. Summary length:",
-        summary.length
-      );
+    const saved = await Summary.findOneAndUpdate(
+      { fileId: payload.fileId },
+      {
+        userId: payload.userId,
+        fileId: payload.fileId,
+        text,
+        summary,
+        summaryType,
+      },
+      { upsert: true, new: true }
+    );
 
-      const saved = await Summary.findOneAndUpdate(
-        { fileId },
-        {
-          userId,
-          fileId,
-          text,
-          summary,
-        },
-        { upsert: true, new: true }
-      );
-
-      console.log("💾 [SUMMARY] (sync) Saved to database:", saved._id);
-      return res.json({ success: true, summary: saved.summary, text: saved.text });
-    }
-
-    // Otherwise fork a worker process to do the heavy lifting to avoid
-    // blocking or exhausting the main server's memory.
-    const { fork } = require("child_process");
-    const workerPath = require("path").resolve(__dirname, "../../scripts/summaryWorker.js");
-    // fork worker with increased heap to avoid OOM on large documents
-    const worker = fork(workerPath, [], {
-      execArgv: ["--max-old-space-size=4096"],
-      stdio: ["inherit", "inherit", "inherit", "ipc"],
+    return res.json({
+      success: true,
+      summary: saved.summary,
+      text: saved.text,
+      summaryType: saved.summaryType,
     });
-    worker.send({ fileId, userId, fileUrl });
-    worker.on("message", (m) => console.log("[controller] worker message:", m));
-    worker.on("exit", (code) => console.log("[controller] worker exited with", code));
-
-    console.log("🔔 [SUMMARY] Worker started for fileId:", fileId);
-    return res.status(202).json({ success: true, message: "Summary generation started" });
   } catch (err) {
     console.error("❌ [SUMMARY] Error:", err);
     res
-      .status(500)
-      .json({ success: false, message: "Summary generation failed" });
+      .status(err.statusCode || 500)
+      .json({ success: false, message: err.message || "Summary generation failed" });
   }
 };
 
 // Extract OCR text only and save (upsert) — returns saved text
 exports.extractTextOnly = async (req, res) => {
   try {
-    console.log("🔍 [OCR] extractTextOnly called with:", req.body);
-    const { userId, fileId, fileUrl } = req.body;
-
-    let uid = userId;
-    let fUrl = fileUrl;
-
-    if (!fUrl || !uid) {
-      console.log("🔍 [OCR] Looking up file with fileId:", fileId);
-      const fileDoc = await File.findById(fileId);
-      if (!fileDoc) {
-        console.log("❌ [OCR] File not found:", fileId);
-        return res
-          .status(404)
-          .json({ success: false, message: "File not found" });
-      }
-      fUrl = fUrl || fileDoc.fileUrl;
-      uid = uid || fileDoc.userId;
-      console.log("🔍 [OCR] Found file. URL:", fUrl, "UserID:", uid);
-    }
-
-    console.log("🔄 [OCR] Starting text extraction...");
-    const text = await extractText({ fileUrl: fUrl });
-    console.log(
-      "✅ [OCR] Text extraction completed. Text length:",
-      text.length
-    );
+    const payload = await resolveFilePayload(req.body);
+    const text = await extractText({
+      fileUrl: payload.fileUrl,
+      fileType: payload.fileType,
+      filename: payload.filename,
+      text: req.body.text,
+    });
 
     const saved = await Summary.findOneAndUpdate(
-      { fileId },
-      { userId: uid, fileId, text },
+      { fileId: payload.fileId },
+      { userId: payload.userId, fileId: payload.fileId, text },
       { upsert: true, new: true }
     );
 
-    console.log("💾 [OCR] Saved to database:", saved._id);
     res.json({ success: true, text: saved.text });
   } catch (err) {
     console.error("❌ [OCR] Error:", err);
-    res.status(500).json({ success: false, message: "OCR extraction failed" });
+    res
+      .status(err.statusCode || 500)
+      .json({ success: false, message: err.message || "OCR extraction failed" });
   }
 };
 

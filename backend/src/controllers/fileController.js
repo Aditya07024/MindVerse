@@ -25,7 +25,10 @@ exports.uploadToCloudinary = async (req, res) => {
       (error, result) => {
         if (error) {
           console.error("Cloudinary upload error:", error);
-          return res.status(500).json({ success: false });
+          return res.status(500).json({
+            success: false,
+            message: error.message || "Cloudinary upload failed",
+          });
         }
 
         res.json({
@@ -38,7 +41,10 @@ exports.uploadToCloudinary = async (req, res) => {
     uploadStream.end(req.file.buffer);
   } catch (err) {
     console.error("Upload error:", err);
-    res.status(500).json({ success: false });
+    res.status(500).json({
+      success: false,
+      message: err.message || "Upload failed",
+    });
   }
 };
 
@@ -87,8 +93,20 @@ exports.uploadFileUrl = async (req, res) => {
 exports.getUserFiles = async (req, res) => {
   try {
     const { userId } = req.params;
+    const { search = "", type = "all" } = req.query;
+    const query = { userId };
 
-    const files = await File.find({ userId }).sort({ createdAt: -1 });
+    if (search.trim()) {
+      query.filename = { $regex: search.trim(), $options: "i" };
+    }
+
+    if (type === "pdf") {
+      query.fileType = "application/pdf";
+    } else if (type === "image") {
+      query.fileType = { $regex: "^image/", $options: "i" };
+    }
+
+    const files = await File.find(query).sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
